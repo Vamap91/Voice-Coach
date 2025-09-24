@@ -226,60 +226,92 @@ Responda naturalmente como um cliente brasileiro real. Se perguntaram dados espe
             except Exception as e:
                 st.warning(f"OpenAI falhou: {e}, usando resposta inteligente")
         
-        # Sistema de respostas inteligentes baseado no que o agente perguntou
+        # Sistema de respostas inteligentes - ORDEM IMPORTA!
         
-        # Detecta o que o agente está perguntando
-        if any(word in agent_last for word in ["segundo", "outro", "mais um", "adicional"]) and "telefone" in agent_last:
-            return f"Sim, tenho outro número: {self.customer_data['phone2']}."
+        # 1. Se pediu múltiplos dados juntos (prioridade)
+        if "placa" in agent_last and "cpf" in agent_last:
+            return f"Claro! Minha placa é {self.customer_data['plate']} e meu CPF é {self.customer_data['cpf']}."
         
-        elif any(word in agent_last for word in ["celular", "whatsapp", "zap"]):
-            return f"Meu celular é {self.customer_data['phone1']}, pode usar para WhatsApp também."
+        elif ("dados" in agent_last or "informações" in agent_last) and ("cpf" in agent_last or "telefone" in agent_last):
+            return f"Meu nome é {self.customer_data['name']}, CPF {self.customer_data['cpf']}, telefone {self.customer_data['phone1']}."
         
-        elif "cpf" in agent_last and ("repetir" in agent_last or "confirma" in agent_last):
-            return f"Isso mesmo, {self.customer_data['cpf']}."
+        # 2. Telefones (específicos)
+        elif ("segundo" in agent_last or "outro" in agent_last or "adicional" in agent_last or "secundário" in agent_last) and "telefone" in agent_last:
+            return f"Tenho sim! O segundo número é {self.customer_data['phone2']}."
         
-        elif "placa" in agent_last and ("repetir" in agent_last or "confirma" in agent_last):
-            return f"Exato, {self.customer_data['plate']}."
+        elif ("celular" in agent_last or "whatsapp" in agent_last or "zap" in agent_last) and "principal" in agent_last:
+            return f"Meu celular principal é {self.customer_data['phone1']}."
         
-        elif "endereço" in agent_last or "onde" in agent_last:
-            return f"Moro na {self.customer_data['address']}."
-        
-        elif any(word in agent_last for word in ["nome", "como", "chama"]):
-            return f"Meu nome é {self.customer_data['name']}."
-        
-        elif "cpf" in agent_last:
-            return f"Meu CPF é {self.customer_data['cpf']}."
-        
-        elif "placa" in agent_last:
-            return f"A placa é {self.customer_data['plate']}, é um {self.customer_data['car']}."
-        
-        elif "telefone" in agent_last:
+        elif "telefone" in agent_last and ("qual" in agent_last or "número" in agent_last):
             return f"Meu telefone é {self.customer_data['phone1']}."
         
-        elif any(word in agent_last for word in ["trinca", "dano", "problema", "aconteceu"]):
-            return "A trinca tem uns 15cm, foi uma pedra que bateu ontem. Está bem no meio do para-brisa."
+        # 3. Confirmações (específicas)
+        elif "placa" in agent_last and ("correto" in agent_last or "confirma" in agent_last or "certo" in agent_last):
+            return f"Isso mesmo, {self.customer_data['plate']}."
         
-        elif any(word in agent_last for word in ["cidade", "loja", "onde", "local"]):
-            return "Estou aqui em São Paulo, zona sul. Qual a loja mais próxima?"
+        elif "cpf" in agent_last and ("correto" in agent_last or "confirma" in agent_last or "certo" in agent_last):
+            return f"Exato, {self.customer_data['cpf']}."
         
-        elif any(word in agent_last for word in ["email", "e-mail"]):
-            return "Pode usar joao.silva@email.com"
+        # 4. Dados individuais
+        elif "nome" in agent_last and ("seu" in agent_last or "como" in agent_last):
+            return f"Meu nome é {self.customer_data['name']}."
         
-        elif any(word in agent_last for word in ["obrigad", "ok", "certo", "perfeito"]):
-            return "De nada! Muito obrigado pela atenção."
+        elif "cpf" in agent_last and "seu" in agent_last:
+            return f"Meu CPF é {self.customer_data['cpf']}."
         
-        # Respostas genéricas por contexto
+        elif "placa" in agent_last and ("seu" in agent_last or "carro" in agent_last):
+            return f"A placa do meu carro é {self.customer_data['plate']}, é um {self.customer_data['car']}."
+        
+        elif "endereço" in agent_last or ("onde" in agent_last and "mora" in agent_last):
+            return f"Moro na {self.customer_data['address']}."
+        
+        # 5. Sobre o problema
+        elif any(word in agent_last for word in ["aconteceu", "ocorreu", "problema", "conte"]):
+            return "Foi uma pedra que bateu no para-brisa ontem. A trinca tem uns 15cm e está crescendo."
+        
+        elif any(word in agent_last for word in ["trinca", "dano", "tamanho"]):
+            return "A trinca tem uns 15cm, bem no meio do para-brisa. Aconteceu ontem quando passou um caminhão."
+        
+        elif any(word in agent_last for word in ["quando", "data"]):
+            return "Foi ontem, dia 23. Estava dirigindo na marginal quando uma pedra bateu."
+        
+        # 6. Localização e agendamento
+        elif any(word in agent_last for word in ["cidade", "onde", "região"]):
+            return "Estou aqui em São Paulo, zona sul. Bairro Vila Olímpia."
+        
+        elif any(word in agent_last for word in ["loja", "unidade", "local"]):
+            return "Pode ser na loja mais próxima de mim. Qual vocês têm na zona sul?"
+        
+        # 7. Email
+        elif "email" in agent_last or "e-mail" in agent_last:
+            return "Meu email é joao.silva@gmail.com"
+        
+        # 8. Respostas de cortesia
+        elif any(word in agent_last for word in ["obrigad", "agradeç"]):
+            return "Eu que agradeço! Vocês são muito atenciosos."
+        
         elif any(word in agent_last for word in ["ajudar", "ajuda"]):
-            return "Preciso trocar o para-brisa do meu carro. Vocês fazem pelo seguro?"
+            return "Sim, preciso trocar esse para-brisa. É coberto pelo seguro?"
         
+        elif "como funciona" in agent_last:
+            return "Nunca usei esse serviço. Vocês vão até minha casa ou tenho que levar na loja?"
+        
+        # 9. Respostas genéricas mais naturais
         else:
-            # Resposta padrão mais natural
-            opcoes = [
-                "Sim, pode me ajudar com isso?",
-                "Perfeito, como funciona?",
-                "Certo, e agora?",
-                "Ok, entendi."
-            ]
+            # Baseado no contexto geral
+            if len(turns) < 4:  # Início da conversa
+                opcoes = [
+                    "Perfeito! Como vocês podem me ajudar?",
+                    "Ótimo! Qual o próximo passo?",
+                    "Sim, pode me orientar?"
+                ]
+            else:  # Meio/fim da conversa
+                opcoes = [
+                    "Entendi. E agora?",
+                    "Ok, pode continuar.",
+                    "Certo, o que mais precisa?",
+                    "Perfeito!"
+                ]
             return random.choice(opcoes)
 
 # ===== INTERFACE STREAMLIT =====
