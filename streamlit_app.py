@@ -8,27 +8,64 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from gtts import gTTS
+import numpy as np
 
-# ===== FUNÇÕES UTILITÁRIAS =====
+st.set_page_config(page_title="Voice Coach - Real Time", layout="wide")
+
+def load_system_prompt():
+    try:
+        with open("data/prompts/system_ptbr.md", "r", encoding="utf-8") as f:
+            base_prompt = f.read().strip()
+    except FileNotFoundError:
+        base_prompt = """
+Você é um assistente de treinamento de atendimento ao cliente. Seu objetivo é simular um cliente em uma ligação de suporte, seguindo o cenário e a persona definidos. Responda de forma natural e realista, como um cliente brasileiro faria.
+        """.strip()
+    return base_prompt
+
+def build_customer_prompt(customer_data, agent_last, base_prompt):
+    return f"""
+{base_prompt}
+
+VOCÊ É: {customer_data['name']}, cliente brasileiro ligando para a Carglass.
+
+SEUS DADOS PESSOAIS:
+- Nome: {customer_data['name']}
+- CPF: {customer_data['cpf']}
+- Telefone principal: {customer_data['phone1']}
+- Telefone secundário: {customer_data['phone2']}
+- Placa do veículo: {customer_data['plate']}
+- Modelo do carro: {customer_data['car']}
+- Endereço: {customer_data['address']}
+
+SEU PROBLEMA:
+Você tem uma trinca no para-brisa de aproximadamente 15cm, causada por uma pedra que bateu ontem. A trinca está no meio do vidro e está incomodando a visão.
+
+ÚLTIMA FALA DO ATENDENTE:
+"{agent_last}"
+
+INSTRUÇÕES:
+1. Responda de forma natural como um cliente brasileiro real
+2. Se perguntaram dados específicos, forneça as informações corretas dos seus dados acima
+3. Se perguntaram sobre o problema, descreva a trinca no para-brisa
+4. Seja cordial mas direto
+5. Máximo 2 frases por resposta
+6. Use linguagem informal mas respeitosa
+
+RESPONDA AGORA:
+"""
+
 def normalize_text(text: str) -> str:
-    """Normaliza o texto para análise."""
     if not text:
         return ""
     text = text.lower()
-    # Remove pontuação comum
     text = re.sub(r'[.,?!;:"(){}[\]]', "", text)
     return text
 
-def transcribe_bytes(audio_bytes: bytes) -> str:
-    """Transcrição simulada - substitua por Whisper se disponível."""
-    # Por enquanto, retorna texto placeholder
-    # TODO: Implementar Whisper quando bibliotecas estiverem disponíveis
-    return "Texto transcrito simulado - substitua por transcrição real"
+def transcribe_audio_placeholder():
+    return "Transcrição automática será implementada com Whisper"
 
-def tts_bytes(text: str, use_openai: bool = False, use_azure: bool = False) -> bytes:
-    """Converte texto em áudio usando gTTS."""
+def tts_bytes(text: str, use_openai: bool = False) -> bytes:
     try:
-        # 1. Tenta OpenAI TTS se habilitado
         if use_openai:
             try:
                 openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
@@ -46,7 +83,6 @@ def tts_bytes(text: str, use_openai: bool = False, use_azure: bool = False) -> b
             except Exception as e:
                 st.warning(f"OpenAI TTS falhou: {e}")
         
-        # 2. Fallback gTTS
         if not text.strip():
             return b""
         
@@ -60,7 +96,6 @@ def tts_bytes(text: str, use_openai: bool = False, use_azure: bool = False) -> b
         st.error(f"Erro no TTS: {e}")
         return b""
 
-# ===== CHECKLIST E SCORING =====
 CHECKLIST_WEIGHTS = [
     (1, 10, "Atendeu em 5s e saudação correta com técnicas de atendimento encantador"),
     (2,  6, "Solicitou dados completos (2 telefones, nome, CPF, placa, endereço)"),
@@ -91,28 +126,25 @@ class ScoreEngine:
         points = 0
         max_points = next(m for i,m,_ in CHECKLIST_WEIGHTS if i == idx)
 
-        # Regras simplificadas de pontuação
-        if idx == 1:  # Saudação
+        if idx == 1:
             if re.search(r"\b(bom dia|boa tarde|boa noite)\b", text) and re.search(r"\bcarglass\b", text):
                 points = max_points
                 evidence.append("Saudação + Carglass encontrados")
         
-        elif idx == 2:  # Dados
+        elif idx == 2:
             dados = len(re.findall(r"\b(cpf|placa|nome|telefone|endereço)\b", text))
             points = min(max_points, dados * 2)
             evidence.append(f"{dados} tipos de dados solicitados")
         
-        elif idx == 3:  # LGPD
+        elif idx == 3:
             if re.search(r"\b(lgpd|proteção de dados)\b", text):
                 points = max_points
                 evidence.append("LGPD mencionado")
         
-        elif idx == 6:  # Conhecimento
+        elif idx == 6:
             if re.search(r"\b(para-brisa|vidro|seguro|franquia)\b", text):
                 points = max_points
                 evidence.append("Conhecimento técnico demonstrado")
-        
-        # Adicione mais regras conforme necessário
         
         return points, evidence
 
@@ -133,26 +165,25 @@ class ScoreEngine:
             })
         
         tips = []
-        for item in items:
+        for item in items[:3]:
             if item["points"] < item["max_points"]:
                 tips.append(f"Melhore item {item['idx']}: {item['label'][:50]}...")
         
         if not tips:
-            tips.append("Excelente! Todos os critérios foram atendidos.")
+            tips.append("Excelente! Continue assim!")
         
         return {
             "items": items, 
             "total": total, 
             "max_total": sum(m for _,m,_ in CHECKLIST_WEIGHTS), 
-            "tips": tips[:3]  # Máximo 3 dicas
+            "tips": tips
         }
 
-# ===== SIMULADOR DE CLIENTE =====
 class CustomerBrain:
     def __init__(self, use_llm: bool, scenario: dict):
         self.use_llm = use_llm
         self.scenario = scenario
-        self.stage = 0
+        self.system_prompt = load_system_prompt()
         self.customer_data = {
             "name": "João Silva",
             "cpf": "123.456.789-10",
@@ -163,7 +194,6 @@ class CustomerBrain:
             "address": "Rua das Flores, 123 - São Paulo/SP"
         }
         
-        # Verifica OpenAI
         openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
         self.use_llm = use_llm and (openai_key is not None)
         
@@ -175,45 +205,12 @@ class CustomerBrain:
                 self.use_llm = False
 
     def first_utterance(self):
-        opcoes = [
-            "Olá, bom dia! Eu sou segurado e preciso resolver um problema no para-brisa.",
-            "Oi, boa tarde! Tenho um problema no vidro do meu carro.",
-            "Alô? Preciso de ajuda com o para-brisa do meu veículo."
-        ]
-        return random.choice(opcoes)
+        return "Olá, bom dia! Eu sou segurado e preciso resolver um problema no para-brisa do meu carro."
 
-    def reply(self, turns):
-        if not turns:
-            return self.first_utterance()
-        
-        # Pega a última fala do agente
-        agent_last = ""
-        for turn in reversed(turns):
-            if turn["speaker"] == "agent":
-                agent_last = turn["text"].lower()
-                break
-        
-        # Usa LLM se disponível
+    def reply(self, agent_text):
         if self.use_llm:
             try:
-                prompt = f"""
-Você é {self.customer_data['name']}, um cliente brasileiro ligando para a Carglass.
-
-SEUS DADOS:
-- Nome: {self.customer_data['name']}
-- CPF: {self.customer_data['cpf']}
-- Telefone 1: {self.customer_data['phone1']}
-- Telefone 2: {self.customer_data['phone2']}
-- Placa: {self.customer_data['plate']}
-- Carro: {self.customer_data['car']}
-- Endereço: {self.customer_data['address']}
-
-PROBLEMA: Trinca no para-brisa de uns 15cm, causada por pedra ontem.
-
-Última fala do atendente: "{agent_last}"
-
-Responda naturalmente como um cliente brasileiro real. Se perguntaram dados específicos, forneça-os. Seja breve (máximo 2 frases).
-"""
+                prompt = build_customer_prompt(self.customer_data, agent_text, self.system_prompt)
                 
                 response = self.client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -224,103 +221,48 @@ Responda naturalmente como um cliente brasileiro real. Se perguntaram dados espe
                 return response.choices[0].message.content.strip()
                 
             except Exception as e:
-                st.warning(f"OpenAI falhou: {e}, usando resposta inteligente")
+                st.warning(f"OpenAI falhou: {e}")
         
-        # Sistema de respostas inteligentes - ORDEM IMPORTA!
+        agent_lower = agent_text.lower()
         
-        # 1. Se pediu múltiplos dados juntos (prioridade)
-        if "placa" in agent_last and "cpf" in agent_last:
+        if "placa" in agent_lower and "cpf" in agent_lower:
             return f"Claro! Minha placa é {self.customer_data['plate']} e meu CPF é {self.customer_data['cpf']}."
         
-        elif ("dados" in agent_last or "informações" in agent_last) and ("cpf" in agent_last or "telefone" in agent_last):
-            return f"Meu nome é {self.customer_data['name']}, CPF {self.customer_data['cpf']}, telefone {self.customer_data['phone1']}."
-        
-        # 2. Telefones (específicos)
-        elif ("segundo" in agent_last or "outro" in agent_last or "adicional" in agent_last or "secundário" in agent_last) and "telefone" in agent_last:
+        elif ("segundo" in agent_lower or "outro" in agent_lower) and "telefone" in agent_lower:
             return f"Tenho sim! O segundo número é {self.customer_data['phone2']}."
         
-        elif ("celular" in agent_last or "whatsapp" in agent_last or "zap" in agent_last) and "principal" in agent_last:
-            return f"Meu celular principal é {self.customer_data['phone1']}."
-        
-        elif "telefone" in agent_last and ("qual" in agent_last or "número" in agent_last):
-            return f"Meu telefone é {self.customer_data['phone1']}."
-        
-        # 3. Confirmações (específicas)
-        elif "placa" in agent_last and ("correto" in agent_last or "confirma" in agent_last or "certo" in agent_last):
-            return f"Isso mesmo, {self.customer_data['plate']}."
-        
-        elif "cpf" in agent_last and ("correto" in agent_last or "confirma" in agent_last or "certo" in agent_last):
-            return f"Exato, {self.customer_data['cpf']}."
-        
-        # 4. Dados individuais
-        elif "nome" in agent_last and ("seu" in agent_last or "como" in agent_last):
+        elif "nome" in agent_lower:
             return f"Meu nome é {self.customer_data['name']}."
         
-        elif "cpf" in agent_last and "seu" in agent_last:
+        elif "cpf" in agent_lower:
             return f"Meu CPF é {self.customer_data['cpf']}."
         
-        elif "placa" in agent_last and ("seu" in agent_last or "carro" in agent_last):
-            return f"A placa do meu carro é {self.customer_data['plate']}, é um {self.customer_data['car']}."
+        elif "placa" in agent_lower:
+            return f"A placa é {self.customer_data['plate']}, um {self.customer_data['car']}."
         
-        elif "endereço" in agent_last or ("onde" in agent_last and "mora" in agent_last):
-            return f"Moro na {self.customer_data['address']}."
+        elif "telefone" in agent_lower:
+            return f"Meu telefone é {self.customer_data['phone1']}."
         
-        # 5. Sobre o problema
-        elif any(word in agent_last for word in ["aconteceu", "ocorreu", "problema", "conte"]):
-            return "Foi uma pedra que bateu no para-brisa ontem. A trinca tem uns 15cm e está crescendo."
+        elif any(word in agent_lower for word in ["trinca", "problema", "aconteceu"]):
+            return "A trinca tem uns 15cm no meio do para-brisa. Foi uma pedra que bateu ontem."
         
-        elif any(word in agent_last for word in ["trinca", "dano", "tamanho"]):
-            return "A trinca tem uns 15cm, bem no meio do para-brisa. Aconteceu ontem quando passou um caminhão."
+        elif any(word in agent_lower for word in ["cidade", "onde", "loja"]):
+            return "Estou em São Paulo, zona sul. Qual a loja mais próxima?"
         
-        elif any(word in agent_last for word in ["quando", "data"]):
-            return "Foi ontem, dia 23. Estava dirigindo na marginal quando uma pedra bateu."
+        elif "ajudar" in agent_lower:
+            return "Preciso trocar esse para-brisa. É coberto pelo seguro?"
         
-        # 6. Localização e agendamento
-        elif any(word in agent_last for word in ["cidade", "onde", "região"]):
-            return "Estou aqui em São Paulo, zona sul. Bairro Vila Olímpia."
-        
-        elif any(word in agent_last for word in ["loja", "unidade", "local"]):
-            return "Pode ser na loja mais próxima de mim. Qual vocês têm na zona sul?"
-        
-        # 7. Email
-        elif "email" in agent_last or "e-mail" in agent_last:
-            return "Meu email é joao.silva@gmail.com"
-        
-        # 8. Respostas de cortesia
-        elif any(word in agent_last for word in ["obrigad", "agradeç"]):
-            return "Eu que agradeço! Vocês são muito atenciosos."
-        
-        elif any(word in agent_last for word in ["ajudar", "ajuda"]):
-            return "Sim, preciso trocar esse para-brisa. É coberto pelo seguro?"
-        
-        elif "como funciona" in agent_last:
-            return "Nunca usei esse serviço. Vocês vão até minha casa ou tenho que levar na loja?"
-        
-        # 9. Respostas genéricas mais naturais
         else:
-            # Baseado no contexto geral
-            if len(turns) < 4:  # Início da conversa
-                opcoes = [
-                    "Perfeito! Como vocês podem me ajudar?",
-                    "Ótimo! Qual o próximo passo?",
-                    "Sim, pode me orientar?"
-                ]
-            else:  # Meio/fim da conversa
-                opcoes = [
-                    "Entendi. E agora?",
-                    "Ok, pode continuar.",
-                    "Certo, o que mais precisa?",
-                    "Perfeito!"
-                ]
-            return random.choice(opcoes)
+            return random.choice([
+                "Perfeito, pode continuar.",
+                "Ok, entendi.",
+                "Certo, e agora?",
+                "Sim, pode me ajudar com isso?"
+            ])
 
-# ===== INTERFACE STREAMLIT =====
-st.set_page_config(page_title="Voice Coach - MVP", layout="wide")
+st.title("🎤 Voice Coach - Conversa em Tempo Real")
+st.caption("Treine atendimento com conversas por áudio realísticas")
 
-st.title("🎯 Voice Coach (MVP) — Treinador de Ligações Carglass")
-st.caption("Simulador de cliente + Score automático (81 pts) baseado no checklist.")
-
-# Verificar APIs
 def check_api_status():
     status = {}
     try:
@@ -330,174 +272,381 @@ def check_api_status():
         status["openai"] = "❌ Não configurado"
     return status
 
-# Sidebar
 with st.sidebar:
-    st.header("⚙️ Configurações")
+    st.header("🎯 Configurações")
     
     api_status = check_api_status()
-    st.subheader("Status das APIs")
     st.write(f"**OpenAI:** {api_status['openai']}")
     
-    use_llm = st.toggle("Usar OpenAI para cliente inteligente", 
+    use_llm = st.toggle("Cliente Inteligente (OpenAI)", 
                        value=(api_status["openai"] == "✅ Configurado"))
-    use_openai_tts = st.toggle("Usar OpenAI TTS (voz de qualidade)", 
+    use_openai_tts = st.toggle("Voz Premium (OpenAI TTS)", 
                               value=(api_status["openai"] == "✅ Configurado"))
     
-    if not api_status["openai"] == "✅ Configurado":
-        st.info("💡 Configure OpenAI em Settings → Secrets")
+    st.divider()
+    st.subheader("📋 Cliente Simulado")
+    st.write("**João Silva**")
+    st.caption("CPF: 123.456.789-10")
+    st.caption("Placa: ABC-1234 (Civic 2020)")
+    st.caption("Problema: Trinca no para-brisa")
 
-# Cenário
-scenario = {
-    "type": "Troca de Para-brisa",
-    "context": "Cliente liga reportando trinca no para-brisa causada por pedra",
-    "source_id": "default"
-}
-
-st.subheader("📋 Cenário Selecionado")
-with st.expander("Ver detalhes", expanded=False):
-    st.write(f"**Tipo:** {scenario['type']}")
-    st.write(f"**Contexto:** {scenario['context']}")
-
-# Inicializar sistema
 if "brain" not in st.session_state:
+    scenario = {"type": "Troca de Para-brisa", "context": "Cliente com trinca no para-brisa"}
     st.session_state.brain = CustomerBrain(use_llm=use_llm, scenario=scenario)
 
 if "turns" not in st.session_state:
     st.session_state.turns = []
+    first_msg = st.session_state.brain.first_utterance()
+    st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
 
 if "score" not in st.session_state:
     st.session_state.score = ScoreEngine()
 
-# Primeira fala do cliente
-if len(st.session_state.turns) == 0:
-    first = st.session_state.brain.first_utterance()
-    st.session_state.turns.append({"speaker":"customer","text":first, "ts": time.time()})
+if "last_customer_audio" not in st.session_state:
+    st.session_state.last_customer_audio = None
 
-# Layout principal
-col1, col2 = st.columns([1,1])
+col_chat, col_controls = st.columns([2, 1])
 
-with col1:
-    st.markdown("### 💬 Conversa")
-    for i, turn in enumerate(st.session_state.turns):
-        if turn["speaker"] == "customer":
-            with st.chat_message("assistant", avatar="📞"):
-                st.write(f"**Cliente:** {turn['text']}")
-        else:
-            with st.chat_message("user", avatar="🧑‍💼"):
-                st.write(f"**Agente:** {turn['text']}")
-
-with col2:
-    st.markdown("### 🎤 Sua Resposta")
+with col_chat:
+    st.markdown("### 🎧 Conversa Telefônica")
     
-    # Opção 1: Texto direto (para testes rápidos)
-    st.markdown("**Opção 1: Digite sua resposta**")
-    agent_text = st.text_area("Digite o que você falaria:", 
-                             placeholder="Ex: Bom dia! Carglass, meu nome é Maria...",
-                             key="agent_input")
-    
-    if st.button("💬 Enviar Resposta", type="primary", disabled=not agent_text):
-        # Adicionar resposta do agente
-        st.session_state.turns.append({"speaker":"agent","text":agent_text, "ts": time.time()})
-        
-        # Atualizar score
-        st.session_state.score.consume_turns(st.session_state.turns)
-        
-        # Resposta do cliente
-        reply = st.session_state.brain.reply(st.session_state.turns)
-        st.session_state.turns.append({"speaker":"customer","text":reply, "ts": time.time()})
-        
-        # TTS da resposta
-        with st.spinner("Gerando áudio do cliente..."):
-            audio_reply = tts_bytes(reply, use_openai=use_openai_tts)
-            if audio_reply:
-                st.audio(audio_reply, format="audio/wav")
-        
-        st.rerun()
-    
-    # Opção 2: Upload de áudio
-    st.divider()
-    st.markdown("**Opção 2: Upload de áudio**")
-    audio_file = st.file_uploader("Grave e envie seu áudio", type=["wav","mp3"])
-    
-    if audio_file and st.button("🎵 Processar Áudio"):
-        st.info("Funcionalidade de transcrição será implementada com Whisper")
-        # audio_bytes = audio_file.read()
-        # transcription = transcribe_bytes(audio_bytes)
-        # st.write(f"Transcrição: {transcription}")
-
-# Avaliação
-st.divider()
-st.markdown("## 📊 Avaliação em Tempo Real")
-
-if len([t for t in st.session_state.turns if t["speaker"]=="agent"]) == 0:
-    st.info("👆 Faça sua primeira interação para ver a avaliação!")
-else:
-    res = st.session_state.score.report()
-    
-    # Métricas
-    col_m1, col_m2, col_m3 = st.columns(3)
-    with col_m1:
-        st.metric("📈 Pontuação", f"{res['total']}/{res['max_total']}")
-    with col_m2:
-        percentage = round((res['total'] / res['max_total']) * 100, 1)
-        st.metric("📊 Percentual", f"{percentage}%")
-    with col_m3:
-        items_ok = sum(1 for item in res["items"] if item["points"] == item["max_points"])
-        st.metric("✅ Completos", f"{items_ok}/12")
-    
-    # Detalhamento
-    st.subheader("📋 Checklist Detalhado")
-    for i, item in enumerate(res["items"], 1):
-        col_status, col_desc, col_points = st.columns([1, 8, 2])
-        
-        with col_status:
-            if item["points"] == item["max_points"]:
-                st.success("✅")
-            elif item["points"] > 0:
-                st.warning("⚠️")
+    chat_container = st.container(height=400)
+    with chat_container:
+        for turn in st.session_state.turns:
+            if turn["speaker"] == "customer":
+                with st.chat_message("assistant", avatar="📞"):
+                    st.write(f"**Cliente:** {turn['text']}")
             else:
-                st.error("❌")
-        
-        with col_desc:
-            st.write(f"**{i}.** {item['label']}")
-            if item["evidence"]:
-                st.caption(f"Evidências: {'; '.join(item['evidence'])}")
-        
-        with col_points:
-            st.write(f"`{item['points']}/{item['max_points']}`")
+                with st.chat_message("user", avatar="🧑‍💼"):
+                    st.write(f"**Você:** {turn['text']}")
+
+with col_controls:
+    st.markdown("### 🎤 Controles")
     
-    # Dicas
-    st.subheader("💡 Dicas de Melhoria")
-    for tip in res["tips"]:
-        st.write(f"• {tip}")
-
-# Ações finais
-st.divider()
-col_exp, col_reset = st.columns(2)
-
-with col_exp:
-    if st.button("📄 Exportar Sessão"):
-        report_data = {
-            "timestamp": datetime.now().isoformat(),
-            "scenario": scenario,
-            "turns": st.session_state.turns,
-            "final_score": st.session_state.score.report()
-        }
-        
-        st.download_button(
-            label="⬇️ Download JSON",
-            data=json.dumps(report_data, ensure_ascii=False, indent=2),
-            file_name=f"voice_coach_{int(time.time())}.json",
-            mime="application/json"
-        )
-
-with col_reset:
-    if st.button("🔄 Nova Sessão"):
-        for key in ["brain", "turns", "score"]:
+    st.markdown("**Modo Texto (Teste)**")
+    agent_input = st.text_area("Sua fala:", 
+                              placeholder="Ex: Bom dia! Carglass, meu nome é Maria...",
+                              height=100,
+                              key="text_input")
+    
+    if st.button("💬 Falar", type="primary", use_container_width=True):
+        if agent_input:
+            st.session_state.turns.append({
+                "speaker": "agent", 
+                "text": agent_input, 
+                "ts": time.time()
+            })
+            
+            st.session_state.score.consume_turns(st.session_state.turns)
+            
+            with st.spinner("Cliente respondendo..."):
+                customer_reply = st.session_state.brain.reply(agent_input)
+                st.session_state.turns.append({
+                    "speaker": "customer", 
+                    "text": customer_reply, 
+                    "ts": time.time()
+                })
+                
+                audio_data = tts_bytes(customer_reply, use_openai=use_openai_tts)
+                if audio_data:
+                    st.session_state.last_customer_audio = audio_data
+            
+            st.session_state.text_input = ""
+            st.rerun()
+    
+    if st.session_state.last_customer_audio:
+        st.markdown("**🔊 Última resposta do cliente:**")
+        st.audio(st.session_state.last_customer_audio, format="audio/wav")
+    
+    st.divider()
+    
+    st.markdown("**🎙️ Modo Áudio (Em breve)**")
+    st.info("📱 Em desenvolvimento:\n- Gravação por voz\n- Transcrição automática\n- Resposta instantânea")
+    
+    if st.button("🔄 Nova Conversa", use_container_width=True):
+        for key in ["brain", "turns", "score", "last_customer_audio"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
 
+st.divider()
+st.markdown("## 📊 Pontuação em Tempo Real")
+
+if len([t for t in st.session_state.turns if t["speaker"]=="agent"]) == 0:
+    st.info("👆 Comece a conversa para ver sua pontuação!")
+else:
+    res = st.session_state.score.report()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Pontos", f"{res['total']}")
+    with col2:
+        st.metric("Total", f"/{res['max_total']}")
+    with col3:
+        percentage = round((res['total'] / res['max_total']) * 100, 1)
+        st.metric("%", f"{percentage}")
+    with col4:
+        items_ok = sum(1 for item in res["items"] if item["points"] == item["max_points"])
+        st.metric("✅", f"{items_ok}/12")
+    
+    if res["tips"]:
+        st.markdown("**💡 Dicas principais:**")
+        for tip in res["tips"]:
+            st.write(f"• {tip}")
+
+st.markdown("---")
+st.markdown("🎯 **Voice Coach Real-Time** - Conversas realísticas para treinamento Carglass")AI:** {api_status['openai']}")
+    
+    use_llm = st.toggle("Cliente Inteligente (OpenAI)", 
+                       value=(api_status["openai"] == "✅ Configurado"))
+    use_openai_tts = st.toggle("Voz Premium (OpenAI TTS)", 
+                              value=(api_status["openai"] == "✅ Configurado"))
+    
+    st.divider()
+    st.subheader("📋 Cliente Simulado")
+    st.write("**João Silva**")
+    st.caption("CPF: 123.456.789-10")
+    st.caption("Placa: ABC-1234 (Civic 2020)")
+    st.caption("Problema: Trinca no para-brisa")
+
+if "brain" not in st.session_state:
+    scenario = {"type": "Troca de Para-brisa", "context": "Cliente com trinca no para-brisa"}
+    st.session_state.brain = CustomerBrain(use_llm=use_llm, scenario=scenario)
+
+if "turns" not in st.session_state:
+    st.session_state.turns = []
+    first_msg = st.session_state.brain.first_utterance()
+    st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
+
+if "score" not in st.session_state:
+    st.session_state.score = ScoreEngine()
+
+if "last_customer_audio" not in st.session_state:
+    st.session_state.last_customer_audio = None
+
+col_chat, col_controls = st.columns([2, 1])
+
+with col_chat:
+    st.markdown("### 🎧 Conversa Telefônica")
+    
+    chat_container = st.container(height=400)
+    with chat_container:
+        for turn in st.session_state.turns:
+            if turn["speaker"] == "customer":
+                with st.chat_message("assistant", avatar="📞"):
+                    st.write(f"**Cliente:** {turn['text']}")
+            else:
+                with st.chat_message("user", avatar="🧑‍💼"):
+                    st.write(f"**Você:** {turn['text']}")
+
+with col_controls:
+    st.markdown("### 🎤 Controles")
+    
+    st.markdown("**Modo Texto (Teste)**")
+    agent_input = st.text_area("Sua fala:", 
+                              placeholder="Ex: Bom dia! Carglass, meu nome é Maria...",
+                              height=100,
+                              key="text_input")
+    
+    if st.button("💬 Falar", type="primary", use_container_width=True):
+        if agent_input:
+            st.session_state.turns.append({
+                "speaker": "agent", 
+                "text": agent_input, 
+                "ts": time.time()
+            })
+            
+            st.session_state.score.consume_turns(st.session_state.turns)
+            
+            with st.spinner("Cliente respondendo..."):
+                customer_reply = st.session_state.brain.reply(agent_input)
+                st.session_state.turns.append({
+                    "speaker": "customer", 
+                    "text": customer_reply, 
+                    "ts": time.time()
+                })
+                
+                audio_data = tts_bytes(customer_reply, use_openai=use_openai_tts)
+                if audio_data:
+                    st.session_state.last_customer_audio = audio_data
+            
+            st.session_state.text_input = ""
+            st.rerun()
+    
+    if st.session_state.last_customer_audio:
+        st.markdown("**🔊 Última resposta do cliente:**")
+        st.audio(st.session_state.last_customer_audio, format="audio/wav")
+    
+    st.divider()
+    
+    st.markdown("**🎙️ Modo Áudio (Em breve)**")
+    st.info("📱 Em desenvolvimento:\n- Gravação por voz\n- Transcrição automática\n- Resposta instantânea")
+    
+    if st.button("🔄 Nova Conversa", use_container_width=True):
+        for key in ["brain", "turns", "score", "last_customer_audio"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
+st.divider()
+st.markdown("## 📊 Pontuação em Tempo Real")
+
+if len([t for t in st.session_state.turns if t["speaker"]=="agent"]) == 0:
+    st.info("👆 Comece a conversa para ver sua pontuação!")
+else:
+    res = st.session_state.score.report()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Pontos", f"{res['total']}")
+    with col2:
+        st.metric("Total", f"/{res['max_total']}")
+    with col3:
+        percentage = round((res['total'] / res['max_total']) * 100, 1)
+        st.metric("%", f"{percentage}")
+    with col4:
+        items_ok = sum(1 for item in res["items"] if item["points"] == item["max_points"])
+        st.metric("✅", f"{items_ok}/12")
+    
+    if res["tips"]:
+        st.markdown("**💡 Dicas principais:**")
+        for tip in res["tips"]:
+            st.write(f"• {tip}")
+
+st.markdown("---")
+st.markdown("🎯 **Voice Coach Real-Time** - Conversas realísticas para treinamento Carglass")AI:** {api_status['openai']}")
+    
+    use_llm = st.toggle("Cliente Inteligente (OpenAI)", 
+                       value=(api_status["openai"] == "✅ Configurado"))
+    use_openai_tts = st.toggle("Voz Premium (OpenAI TTS)", 
+                              value=(api_status["openai"] == "✅ Configurado"))
+    
+    st.divider()
+    st.subheader("📋 Cliente Simulado")
+    st.write("**João Silva**")
+    st.caption("CPF: 123.456.789-10")
+    st.caption("Placa: ABC-1234 (Civic 2020)")
+    st.caption("Problema: Trinca no para-brisa")
+
+# Inicializar sistema
+if "brain" not in st.session_state:
+    scenario = {"type": "Troca de Para-brisa", "context": "Cliente com trinca no para-brisa"}
+    st.session_state.brain = CustomerBrain(use_llm=use_llm, scenario=scenario)
+
+if "turns" not in st.session_state:
+    st.session_state.turns = []
+    # Primeira fala do cliente automaticamente
+    first_msg = st.session_state.brain.first_utterance()
+    st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
+
+if "score" not in st.session_state:
+    st.session_state.score = ScoreEngine()
+
+if "last_customer_audio" not in st.session_state:
+    st.session_state.last_customer_audio = None
+
+# Layout principal
+col_chat, col_controls = st.columns([2, 1])
+
+with col_chat:
+    st.markdown("### 🎧 Conversa Telefônica")
+    
+    # Exibir conversa
+    chat_container = st.container(height=400)
+    with chat_container:
+        for turn in st.session_state.turns:
+            if turn["speaker"] == "customer":
+                with st.chat_message("assistant", avatar="📞"):
+                    st.write(f"**Cliente:** {turn['text']}")
+            else:
+                with st.chat_message("user", avatar="🧑‍💼"):
+                    st.write(f"**Você:** {turn['text']}")
+
+with col_controls:
+    st.markdown("### 🎤 Controles")
+    
+    # Modo texto para testes rápidos
+    st.markdown("**Modo Texto (Teste)**")
+    agent_input = st.text_area("Sua fala:", 
+                              placeholder="Ex: Bom dia! Carglass, meu nome é Maria...",
+                              height=100,
+                              key="text_input")
+    
+    if st.button("💬 Falar", type="primary", use_container_width=True):
+        if agent_input:
+            # Adiciona fala do agente
+            st.session_state.turns.append({
+                "speaker": "agent", 
+                "text": agent_input, 
+                "ts": time.time()
+            })
+            
+            # Atualiza score
+            st.session_state.score.consume_turns(st.session_state.turns)
+            
+            # Resposta do cliente
+            with st.spinner("Cliente respondendo..."):
+                customer_reply = st.session_state.brain.reply(agent_input)
+                st.session_state.turns.append({
+                    "speaker": "customer", 
+                    "text": customer_reply, 
+                    "ts": time.time()
+                })
+                
+                # Gera áudio da resposta
+                audio_data = tts_bytes(customer_reply, use_openai=use_openai_tts)
+                if audio_data:
+                    st.session_state.last_customer_audio = audio_data
+            
+            # Limpa input e atualiza
+            st.session_state.text_input = ""
+            st.rerun()
+    
+    # Player de áudio da última resposta
+    if st.session_state.last_customer_audio:
+        st.markdown("**🔊 Última resposta do cliente:**")
+        st.audio(st.session_state.last_customer_audio, format="audio/wav")
+    
+    st.divider()
+    
+    # Modo áudio (placeholder para desenvolvimento futuro)
+    st.markdown("**🎙️ Modo Áudio (Em breve)**")
+    st.info("📱 Em desenvolvimento:\n- Gravação por voz\n- Transcrição automática\n- Resposta instantânea")
+    
+    if st.button("🔄 Nova Conversa", use_container_width=True):
+        for key in ["brain", "turns", "score", "last_customer_audio"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
+# Score em tempo real
+st.divider()
+st.markdown("## 📊 Pontuação em Tempo Real")
+
+if len([t for t in st.session_state.turns if t["speaker"]=="agent"]) == 0:
+    st.info("👆 Comece a conversa para ver sua pontuação!")
+else:
+    res = st.session_state.score.report()
+    
+    # Métricas compactas
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Pontos", f"{res['total']}")
+    with col2:
+        st.metric("Total", f"/{res['max_total']}")
+    with col3:
+        percentage = round((res['total'] / res['max_total']) * 100, 1)
+        st.metric("%", f"{percentage}")
+    with col4:
+        items_ok = sum(1 for item in res["items"] if item["points"] == item["max_points"])
+        st.metric("✅", f"{items_ok}/12")
+    
+    # Dicas principais
+    if res["tips"]:
+        st.markdown("**💡 Dicas principais:**")
+        for tip in res["tips"]:
+            st.write(f"• {tip}")
+
 # Footer
 st.markdown("---")
-st.markdown("🚀 **Voice Coach MVP** - Treinamento inteligente para equipes Carglass")
+st.markdown("🎯 **Voice Coach Real-Time** - Conversas realísticas para treinamento Carglass")
