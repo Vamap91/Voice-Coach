@@ -153,6 +153,15 @@ class CustomerBrain:
         self.use_llm = use_llm
         self.scenario = scenario
         self.stage = 0
+        self.customer_data = {
+            "name": "João Silva",
+            "cpf": "123.456.789-10",
+            "phone1": "11-99999-8888",
+            "phone2": "11-97777-6666",
+            "plate": "ABC-1234",
+            "car": "Civic 2020",
+            "address": "Rua das Flores, 123 - São Paulo/SP"
+        }
         
         # Verifica OpenAI
         openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
@@ -174,18 +183,104 @@ class CustomerBrain:
         return random.choice(opcoes)
 
     def reply(self, turns):
-        self.stage = min(self.stage + 1, 5)
+        if not turns:
+            return self.first_utterance()
         
-        # Respostas por estágio
-        responses = {
-            1: ["Claro! Meu nome é João Silva, CPF 123.456.789-10."],
-            2: ["A placa do meu carro é ABC-1234. É um Civic 2020."],
-            3: ["A trinca tem uns 15cm. Foi uma pedra que bateu ontem."],
-            4: ["Estou em São Paulo, zona sul. Pode ser na loja mais próxima?"],
-            5: ["Perfeito! Muito obrigado pelo atendimento!"]
-        }
+        # Pega a última fala do agente
+        agent_last = ""
+        for turn in reversed(turns):
+            if turn["speaker"] == "agent":
+                agent_last = turn["text"].lower()
+                break
         
-        return random.choice(responses.get(self.stage, responses[5]))
+        # Usa LLM se disponível
+        if self.use_llm:
+            try:
+                prompt = f"""
+Você é {self.customer_data['name']}, um cliente brasileiro ligando para a Carglass.
+
+SEUS DADOS:
+- Nome: {self.customer_data['name']}
+- CPF: {self.customer_data['cpf']}
+- Telefone 1: {self.customer_data['phone1']}
+- Telefone 2: {self.customer_data['phone2']}
+- Placa: {self.customer_data['plate']}
+- Carro: {self.customer_data['car']}
+- Endereço: {self.customer_data['address']}
+
+PROBLEMA: Trinca no para-brisa de uns 15cm, causada por pedra ontem.
+
+Última fala do atendente: "{agent_last}"
+
+Responda naturalmente como um cliente brasileiro real. Se perguntaram dados específicos, forneça-os. Seja breve (máximo 2 frases).
+"""
+                
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=100
+                )
+                return response.choices[0].message.content.strip()
+                
+            except Exception as e:
+                st.warning(f"OpenAI falhou: {e}, usando resposta inteligente")
+        
+        # Sistema de respostas inteligentes baseado no que o agente perguntou
+        
+        # Detecta o que o agente está perguntando
+        if any(word in agent_last for word in ["segundo", "outro", "mais um", "adicional"]) and "telefone" in agent_last:
+            return f"Sim, tenho outro número: {self.customer_data['phone2']}."
+        
+        elif any(word in agent_last for word in ["celular", "whatsapp", "zap"]):
+            return f"Meu celular é {self.customer_data['phone1']}, pode usar para WhatsApp também."
+        
+        elif "cpf" in agent_last and ("repetir" in agent_last or "confirma" in agent_last):
+            return f"Isso mesmo, {self.customer_data['cpf']}."
+        
+        elif "placa" in agent_last and ("repetir" in agent_last or "confirma" in agent_last):
+            return f"Exato, {self.customer_data['plate']}."
+        
+        elif "endereço" in agent_last or "onde" in agent_last:
+            return f"Moro na {self.customer_data['address']}."
+        
+        elif any(word in agent_last for word in ["nome", "como", "chama"]):
+            return f"Meu nome é {self.customer_data['name']}."
+        
+        elif "cpf" in agent_last:
+            return f"Meu CPF é {self.customer_data['cpf']}."
+        
+        elif "placa" in agent_last:
+            return f"A placa é {self.customer_data['plate']}, é um {self.customer_data['car']}."
+        
+        elif "telefone" in agent_last:
+            return f"Meu telefone é {self.customer_data['phone1']}."
+        
+        elif any(word in agent_last for word in ["trinca", "dano", "problema", "aconteceu"]):
+            return "A trinca tem uns 15cm, foi uma pedra que bateu ontem. Está bem no meio do para-brisa."
+        
+        elif any(word in agent_last for word in ["cidade", "loja", "onde", "local"]):
+            return "Estou aqui em São Paulo, zona sul. Qual a loja mais próxima?"
+        
+        elif any(word in agent_last for word in ["email", "e-mail"]):
+            return "Pode usar joao.silva@email.com"
+        
+        elif any(word in agent_last for word in ["obrigad", "ok", "certo", "perfeito"]):
+            return "De nada! Muito obrigado pela atenção."
+        
+        # Respostas genéricas por contexto
+        elif any(word in agent_last for word in ["ajudar", "ajuda"]):
+            return "Preciso trocar o para-brisa do meu carro. Vocês fazem pelo seguro?"
+        
+        else:
+            # Resposta padrão mais natural
+            opcoes = [
+                "Sim, pode me ajudar com isso?",
+                "Perfeito, como funciona?",
+                "Certo, e agora?",
+                "Ok, entendi."
+            ]
+            return random.choice(opcoes)
 
 # ===== INTERFACE STREAMLIT =====
 st.set_page_config(page_title="Voice Coach - MVP", layout="wide")
