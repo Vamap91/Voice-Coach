@@ -15,7 +15,8 @@ def normalize_text(text: str) -> str:
     if not text:
         return ""
     text = text.lower()
-    text = re.sub(r"[\.\?,!;"]", "", text)
+    # Remove pontuação comum
+    text = re.sub(r'[.,?!;:"(){}[\]]', "", text)
     return text
 
 def transcribe_bytes(audio_bytes: bytes) -> str:
