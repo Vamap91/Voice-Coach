@@ -636,4 +636,205 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     use_llm = st.toggle("Cliente Inteligente", value=(api_status["openai"] == "✅ Configurado"))
-    use_openai_tts = st.toggle("Voz Premium", value=(api_status["openai"] == "✅
+    use_openai_tts = st.toggle("Voz Premium", value=(api_status["openai"] == "✅ Configurado"))
+    
+    st.divider()
+    st.subheader("📋 Cliente Simulado")
+    st.markdown("""
+    **João Silva**  
+    📱 11-99999-8888 / 11-97777-6666  
+    🚗 ABC-1234 (Honda Civic 2020)  
+    📍 Vila Olímpia - São Paulo/SP  
+    🛡️ Porto Seguro  
+    🔧 Trinca no para-brisa (15cm)
+    """)
+
+scenario = {"type": "Troca de Para-brisa", "context": "Cliente com urgência por trinca no para-brisa"}
+
+if "brain" not in st.session_state:
+    st.session_state.brain = IntelligentCustomerBrain(use_llm=use_llm, scenario=scenario)
+
+if "turns" not in st.session_state:
+    st.session_state.turns = []
+
+if "score" not in st.session_state:
+    st.session_state.score = RigorousScoreEngine()
+
+if st.session_state.session_state == "waiting":
+    st.markdown("""
+    <div class="waiting-state">
+        <h2>🎯 Sistema de Treinamento Profissional</h2>
+        <p style="font-size: 1.1rem; margin: 1rem 0;">
+            Simulação realística de atendimento Carglass com avaliação rigorosa baseada no checklist oficial de 81 pontos.
+        </p>
+        <p><strong>⏱️ Duração:</strong> Máximo 20 minutos</p>
+        <p><strong>📊 Avaliação:</strong> 12 critérios específicos</p>
+        <p><strong>🎯 Objetivo:</strong> Treinar atendimento de excelência</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_center = st.columns([1, 2, 1])
+    with col_center[1]:
+        if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
+            st.session_state.session_state = "active"
+            st.session_state.start_time = time.time()
+            first_msg = st.session_state.brain.first_utterance()
+            st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
+            st.rerun()
+
+elif st.session_state.session_state in ["active", "timeout"]:
+    
+    if len(st.session_state.turns) == 0:
+        first_msg = st.session_state.brain.first_utterance()
+        st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
+
+    col_main, col_input = st.columns([2, 1])
+
+    with col_main:
+        st.subheader("📞 Simulação de Atendimento")
+        
+        conversation_container = st.container(height=500)
+        with conversation_container:
+            for turn in st.session_state.turns:
+                if turn["speaker"] == "customer":
+                    with st.chat_message("assistant", avatar="📞"):
+                        st.write(f"**Cliente:** {turn['text']}")
+                else:
+                    with st.chat_message("user", avatar="👤"):
+                        st.write(f"**Você:** {turn['text']}")
+
+    with col_input:
+        st.subheader("🎤 Sua Resposta")
+        
+        if st.session_state.session_state != "timeout":
+            agent_text = st.text_area(
+                "Digite sua resposta:",
+                placeholder="Bom dia! Carglass, meu nome é Maria. Como posso ajudá-lo?",
+                height=120,
+                key="agent_input"
+            )
+            
+            col_send, col_finish = st.columns(2)
+            
+            with col_send:
+                if st.button("💬 Enviar", type="primary", disabled=not agent_text, use_container_width=True):
+                    st.session_state.turns.append({"speaker": "agent", "text": agent_text, "ts": time.time()})
+                    st.session_state.score.consume_turns(st.session_state.turns)
+                    
+                    reply = st.session_state.brain.reply(st.session_state.turns)
+                    st.session_state.turns.append({"speaker": "customer", "text": reply, "ts": time.time()})
+                    
+                    with st.spinner("Cliente respondendo..."):
+                        audio_reply = tts_bytes(reply, use_openai=use_openai_tts)
+                        if audio_reply:
+                            st.audio(audio_reply, format="audio/wav")
+                    
+                    st.rerun()
+            
+            with col_finish:
+                if st.button("🏁 Finalizar", use_container_width=True):
+                    st.session_state.session_state = "finished"
+                    st.rerun()
+            
+            st.divider()
+            
+            if st.button("🔄 Nova Sessão", use_container_width=True):
+                keys_to_clear = ["brain", "turns", "score", "session_state", "start_time", "session_duration"]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+        
+        else:
+            st.error("⏰ Tempo limite atingido")
+            if st.button("🔄 Nova Sessão", use_container_width=True):
+                keys_to_clear = ["brain", "turns", "score", "session_state", "start_time", "session_duration"]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+
+    st.divider()
+
+    if len([t for t in st.session_state.turns if t["speaker"] == "agent"]) > 0:
+        res = st.session_state.score.report()
+        
+        st.markdown("## 📊 Avaliação em Tempo Real")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Pontuação", f"{res['total']}")
+        with col2:
+            st.metric("Máximo", f"{res['max_total']}")
+        with col3:
+            percentage = round((res['total'] / res['max_total']) * 100, 1)
+            color = "🟢" if percentage >= 80 else "🟡" if percentage >= 60 else "🔴"
+            st.metric("Performance", f"{percentage}% {color}")
+        with col4:
+            items_ok = sum(1 for item in res["items"] if item["points"] == item["max_points"])
+            st.metric("Completos", f"{items_ok}/12")
+        
+        with st.expander("📋 Checklist Detalhado", expanded=False):
+            for item in res["items"]:
+                status = "✅" if item["points"] == item["max_points"] else "⚠️" if item["points"] > 0 else "❌"
+                st.markdown(f"""
+                <div class="checklist-item">
+                    <strong>{status} Item {item['idx']}</strong> ({item['points']}/{item['max_points']} pts)<br>
+                    <small>{item['label']}</small><br>
+                    {f"<em>Evidências: {'; '.join(item['evidence'])}</em>" if item['evidence'] else ""}
+                </div>
+                """, unsafe_allow_html=True)
+        
+        if res["tips"]:
+            st.subheader("💡 Principais Recomendações")
+            for tip in res["tips"]:
+                st.info(tip)
+    else:
+        st.info("👆 Digite sua primeira resposta para iniciar a avaliação!")
+
+elif st.session_state.session_state == "finished":
+    st.success("🎉 Treinamento Finalizado!")
+    
+    res = st.session_state.score.report()
+    percentage = round((res['total'] / res['max_total']) * 100, 1)
+    
+    st.markdown("## 📋 Relatório Final de Performance")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Pontuação Final", f"{res['total']}/{res['max_total']}")
+    with col2:
+        color = "🟢" if percentage >= 80 else "🟡" if percentage >= 60 else "🔴"
+        st.metric("Performance", f"{percentage}% {color}")
+    with col3:
+        st.metric("Duração", format_timer(st.session_state.session_duration))
+    
+    session_data = {
+        'turns': st.session_state.turns,
+        'duration': st.session_state.session_duration
+    }
+    
+    pdf_data = generate_pdf_report(session_data, res)
+    
+    col_pdf, col_new = st.columns(2)
+    
+    with col_pdf:
+        st.download_button(
+            label="📄 Baixar Relatório Completo",
+            data=pdf_data,
+            file_name=f"relatorio_voice_coach_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    with col_new:
+        if st.button("🔄 Novo Treinamento", use_container_width=True):
+            keys_to_clear = ["brain", "turns", "score", "session_state", "start_time", "session_duration"]
+            for key in keys_to_clear:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+
+st.markdown("---")
+st.markdown("**🎯 Voice Coach** - Sistema profissional de treinamento Carglass | Avaliação rigorosa baseada no checklist oficial")
