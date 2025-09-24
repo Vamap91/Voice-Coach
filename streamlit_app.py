@@ -678,6 +678,8 @@ if st.session_state.session_state == "waiting":
         if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
             st.session_state.session_state = "active"
             st.session_state.start_time = time.time()
+            st.session_state.turns = []
+            st.session_state.score = RigorousScoreEngine()
             first_msg = st.session_state.brain.first_utterance()
             st.session_state.turns.append({"speaker": "customer", "text": first_msg, "ts": time.time()})
             st.rerun()
