@@ -276,6 +276,10 @@ with st.sidebar:
     st.header("🎯 Configurações")
     
     api_status = check_api_status()
+with st.sidebar:
+    st.header("🎯 Configurações")
+    
+    api_status = check_api_status()
     st.write(f"**OpenAI:** {api_status['openai']}")
     
     use_llm = st.toggle("Cliente Inteligente (OpenAI)", 
