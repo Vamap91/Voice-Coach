@@ -351,7 +351,6 @@ with col_controls:
                 if audio_data:
                     st.session_state.last_customer_audio = audio_data
             
-            st.session_state.text_input = ""
             st.rerun()
     
     if st.session_state.last_customer_audio:
