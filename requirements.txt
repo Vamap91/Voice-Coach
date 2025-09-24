@@ -1,1 +1,11 @@
-streamlit
+streamlit==1.38.0
+streamlit-webrtc==0.47.7
+faster-whisper==1.0.3
+pydub==0.25.1
+soundfile==0.12.1
+numpy==1.26.4
+pandas==2.2.2
+python-dotenv==1.0.1
+openai==1.43.0
+azure-cognitiveservices-speech==1.38.0
+gTTS==2.5.1
