@@ -674,6 +674,18 @@ def main():
         st.session_state.brain = None
         st.session_state.turns = []
         st.session_state.score_engine = HybridScoreEngine()
+    
+    # Garantir que score_engine sempre existe
+    if "score_engine" not in st.session_state:
+        st.session_state.score_engine = HybridScoreEngine()
+    
+    # Garantir que conversation_state sempre existe
+    if "conversation_state" not in st.session_state:
+        st.session_state.conversation_state = ConversationState()
+    
+    # Garantir que turns sempre existe
+    if "turns" not in st.session_state:
+        st.session_state.turns = []
 
     # Timer dinâmico
     timer_placeholder = st.empty()
@@ -900,6 +912,10 @@ def main():
         if len([t for t in st.session_state.turns if t["speaker"] == "agent"]) > 0:
             st.divider()
             
+            # Garantir que score_engine existe antes de usar
+            if "score_engine" not in st.session_state:
+                st.session_state.score_engine = HybridScoreEngine()
+            
             # Avaliar e atualizar estado
             result = st.session_state.score_engine.evaluate_and_update_state(
                 st.session_state.turns, 
@@ -966,6 +982,10 @@ def main():
 
     elif st.session_state.session_state == "finished":
         st.success("🎉 Treinamento Inteligente Finalizado!")
+        
+        # Garantir que score_engine existe antes de usar
+        if "score_engine" not in st.session_state:
+            st.session_state.score_engine = HybridScoreEngine()
         
         # Avaliação final
         result = st.session_state.score_engine.evaluate_and_update_state(
