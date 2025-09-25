@@ -279,7 +279,8 @@ class IntelligentCustomerBrain:
         except:
             openai_key = os.getenv("OPENAI_API_KEY")
         
-        self.use_llm = use_llm and (openai_key is not None)
+        self.use_llm = use_llm and (openai_key is not None) and (openai_key.strip() != "")
+        self.client = None
         
         if self.use_llm:
             try:
@@ -288,6 +289,10 @@ class IntelligentCustomerBrain:
             except ImportError:
                 st.error("OpenAI não instalado. Execute: pip install openai")
                 self.use_llm = False
+            except Exception as e:
+                st.warning(f"Erro ao inicializar OpenAI: {str(e)}")
+                self.use_llm = False
+                self.client = None
         
         # Dados do cliente simulado
         self.customer_data = {
@@ -656,9 +661,13 @@ def check_api_status():
     status = {}
     try:
         openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-        status["openai"] = "✅ Configurado" if openai_key else "❌ Não configurado"
+        status["openai"] = "✅ Configurado" if (openai_key and openai_key.strip()) else "❌ Não configurado"
     except:
-        status["openai"] = "❌ Não configurado"
+        try:
+            openai_key = os.getenv("OPENAI_API_KEY")
+            status["openai"] = "✅ Configurado" if (openai_key and openai_key.strip()) else "❌ Não configurado"
+        except:
+            status["openai"] = "❌ Não configurado"
     
     status["embeddings"] = "✅ Disponível" if EMBEDDINGS_AVAILABLE else "❌ Não instalado"
     return status
