@@ -3,3 +3,13 @@ pandas==2.2.2
 openai==1.43.0
 gTTS==2.5.1
 requests==2.31.0
+
+# Novas dependências para o sistema de embeddings
+sentence-transformers==2.2.2
+scikit-learn==1.3.0
+torch==2.0.1
+numpy==1.24.3
+
+# Opcional: Para melhor performance
+transformers==4.35.0
+tokenizers==0.14.1
