@@ -284,6 +284,8 @@ class EvaluationSystem:
         self.checklist_scores = {item["id"]: 0 for item in OFFICIAL_CHECKLIST}
         self.evidence = {item["id"]: [] for item in OFFICIAL_CHECKLIST}
         self.messages_history = []
+        # Item 5 começa com pontos máximos
+        self.checklist_scores[5] = 3
         
     def evaluate_message(self, message: str) -> Dict:
         """Avalia mensagem do agente baseado no checklist"""
@@ -292,36 +294,157 @@ class EvaluationSystem:
         
         results = {}
         
-        for item in OFFICIAL_CHECKLIST:
-            # Verifica keywords
-            found = [kw for kw in item["keywords"] if kw in message_lower]
+        # ITEM 1 - Saudação (10 pts)
+        if self.checklist_scores[1] < 10:
+            greeting_score = 0
+            evidences = []
             
-            if found:
-                # Adiciona evidências
-                for kw in found:
-                    if kw not in self.evidence[item["id"]]:
-                        self.evidence[item["id"]].append(kw)
-                
-                # Calcula pontos (progressivo, não substitui)
-                if self.checklist_scores[item["id"]] < item["points"]:
-                    earned = min(item["points"], len(found) * (item["points"] / max(3, len(item["keywords"]))))
-                    self.checklist_scores[item["id"]] = min(item["points"], self.checklist_scores[item["id"]] + earned)
-                    
-                    results[item["id"]] = {
-                        "description": item["description"],
-                        "earned": self.checklist_scores[item["id"]],
-                        "max": item["points"],
-                        "evidence": self.evidence[item["id"]]
-                    }
+            # Saudação (3 pts)
+            if any(w in message_lower for w in ['bom dia', 'boa tarde', 'boa noite', 'olá']):
+                greeting_score += 3
+                evidences.append("saudação")
+            
+            # Carglass (3 pts)
+            if 'carglass' in message_lower:
+                greeting_score += 3
+                evidences.append("carglass")
+            
+            # Nome do atendente (4 pts)
+            if any(w in message_lower for w in ['meu nome é', 'me chamo', 'sou o', 'sou a']):
+                greeting_score += 4
+                evidences.append("nome do atendente")
+            
+            if greeting_score > 0:
+                self.checklist_scores[1] = min(10, self.checklist_scores[1] + greeting_score)
+                self.evidence[1] = evidences
         
-        # Item 5 (Escuta atenta) começa com pontos totais
-        if self.checklist_scores[5] == 0:
-            self.checklist_scores[5] = 3
+        # ITEM 2 - Coleta de dados (6 pts)
+        data_requested = []
+        if 'nome' in message_lower and any(w in message_lower for w in ['seu', 'qual', 'me informa', 'pode']):
+            data_requested.append('nome')
+        if 'cpf' in message_lower:
+            data_requested.append('cpf')
+        if 'telefone' in message_lower or 'contato' in message_lower:
+            data_requested.append('telefone')
+        if any(w in message_lower for w in ['segundo telefone', 'outro telefone', 'segunda opção']):
+            data_requested.append('segundo telefone')
+        if 'placa' in message_lower:
+            data_requested.append('placa')
+        if 'endereço' in message_lower or 'onde mora' in message_lower:
+            data_requested.append('endereço')
+        
+        if data_requested:
+            for item in data_requested:
+                if item not in self.evidence[2]:
+                    self.evidence[2].append(item)
+            # Pontuação proporcional (6 dados = 6 pontos)
+            self.checklist_scores[2] = min(6, len(self.evidence[2]))
+        
+        # ITEM 3 - LGPD (2 pts)
+        if self.checklist_scores[3] < 2:
+            if any(w in message_lower for w in ['lgpd', 'lei geral', 'proteção de dados', 'proteção de dado']):
+                if 'autoriza' in message_lower or 'compartilhar' in message_lower or 'compartilhamento' in message_lower:
+                    self.checklist_scores[3] = 2
+                    self.evidence[3] = ['LGPD mencionado']
+        
+        # ITEM 4 - Confirmação ECO (5 pts)
+        if any(w in message_lower for w in ['confirmando', 'confirma', 'repito', 'repetindo']):
+            # Verifica se está confirmando dados principais
+            if any(d in message_lower for d in ['cpf', 'telefone', 'placa', '123.456', '99999', 'abc']):
+                self.checklist_scores[4] = min(5, self.checklist_scores[4] + 2.5)
+                if 'confirmação' not in self.evidence[4]:
+                    self.evidence[4].append('confirmação')
+        
+        # ITEM 6 - Conhecimento técnico (5 pts)
+        tech_words = ['para-brisa', 'parabrisa', 'franquia', 'seguro', 'cobertura', 'vistoria', 'sinistro']
+        found_tech = [w for w in tech_words if w in message_lower]
+        if found_tech:
+            self.checklist_scores[6] = min(5, self.checklist_scores[6] + len(found_tech))
+            self.evidence[6].extend(found_tech)
+        
+        # ITEM 7 - Informações do dano (10 pts)
+        damage_info = 0
+        damage_evidence = []
+        
+        if 'quando' in message_lower:
+            damage_info += 2
+            damage_evidence.append('quando')
+        if any(w in message_lower for w in ['como aconteceu', 'o que aconteceu', 'o que houve']):
+            damage_info += 2
+            damage_evidence.append('como')
+        if 'tamanho' in message_lower:
+            damage_info += 2
+            damage_evidence.append('tamanho')
+        if any(w in message_lower for w in ['led', 'xenon', 'sensor', 'câmera']):
+            damage_info += 4
+            damage_evidence.append('acessórios')
+        
+        if damage_info > 0:
+            self.checklist_scores[7] = min(10, self.checklist_scores[7] + damage_info)
+            self.evidence[7].extend(damage_evidence)
+        
+        # ITEM 8 - Cidade/Loja (10 pts)
+        if self.checklist_scores[8] < 10:
+            city_score = 0
+            if 'cidade' in message_lower or 'onde' in message_lower and 'prefere' in message_lower:
+                city_score += 5
+                self.evidence[8].append('cidade')
+            if 'loja' in message_lower or 'unidade' in message_lower:
+                city_score += 5
+                self.evidence[8].append('loja')
+            
+            if city_score > 0:
+                self.checklist_scores[8] = min(10, self.checklist_scores[8] + city_score)
+        
+        # ITEM 9 - Comunicação profissional (5 pts)
+        prof_words = ['aguarde', 'momento', 'por favor', 'posso ajudar']
+        found_prof = [w for w in prof_words if w in message_lower]
+        if found_prof:
+            self.checklist_scores[9] = min(5, self.checklist_scores[9] + len(found_prof))
+            self.evidence[9].extend(found_prof)
+        
+        # ITEM 10 - Empatia (4 pts)
+        empathy_words = ['entendo', 'compreendo', 'vamos resolver', 'pode ficar tranquilo', 'preocupação']
+        found_empathy = [w for w in empathy_words if w in message_lower]
+        if found_empathy:
+            self.checklist_scores[10] = min(4, self.checklist_scores[10] + len(found_empathy))
+            self.evidence[10].extend(found_empathy)
+        
+        # ITEM 11 - Encerramento (15 pts)
+        closing_score = 0
+        closing_evidence = []
+        
+        if 'protocolo' in message_lower:
+            closing_score += 3
+            closing_evidence.append('protocolo')
+        if 'validade' in message_lower or 'prazo' in message_lower or '14 dias' in message_lower:
+            closing_score += 3
+            closing_evidence.append('validade')
+        if 'franquia' in message_lower:
+            closing_score += 3
+            closing_evidence.append('franquia')
+        if 'link' in message_lower or 'acompanhamento' in message_lower:
+            closing_score += 3
+            closing_evidence.append('link')
+        if 'documento' in message_lower or 'cnh' in message_lower:
+            closing_score += 3
+            closing_evidence.append('documentos')
+        
+        if closing_score > 0:
+            self.checklist_scores[11] = min(15, self.checklist_scores[11] + closing_score)
+            self.evidence[11].extend(closing_evidence)
+        
+        # ITEM 12 - Pesquisa de satisfação (6 pts)
+        if self.checklist_scores[12] < 6:
+            if 'pesquisa' in message_lower and ('satisfação' in message_lower or 'avaliação' in message_lower):
+                self.checklist_scores[12] = 6
+                self.evidence[12] = ['pesquisa mencionada']
         
         return results
     
     def penalize_repetition(self):
-        """Penaliza por repetição (Item 5)"""
+        """Penaliza por repetição REAL (Item 5)"""
+        # Só penaliza se realmente houve repetição desnecessária
         self.checklist_scores[5] = max(0, self.checklist_scores[5] - 1)
     
     def get_total_score(self) -> Tuple[int, int]:
@@ -355,150 +478,158 @@ class VirtualCustomer:
     def __init__(self):
         self.profile = CustomerProfile()
         self.state = ConversationState()
-        self.responses_given = set()
+        self.last_agent_message = ""
+        self.conversation_context = []
         
     def generate_response(self, agent_message: str) -> str:
         """Gera resposta contextual baseada na mensagem do agente"""
         msg_lower = agent_message.lower()
+        self.last_agent_message = msg_lower
+        self.conversation_context.append(msg_lower)
         
-        # Análise da mensagem
-        analysis = {
-            'greeting': any(w in msg_lower for w in ['bom dia', 'boa tarde', 'boa noite', 'olá']),
-            'asking_name': 'nome' in msg_lower and any(w in msg_lower for w in ['seu', 'qual', 'pode', 'informar']),
-            'asking_cpf': 'cpf' in msg_lower,
-            'asking_phone': 'telefone' in msg_lower or 'contato' in msg_lower,
-            'asking_second_phone': any(w in msg_lower for w in ['outro', 'segundo', 'adicional']) and 'telefone' in msg_lower,
-            'asking_plate': 'placa' in msg_lower or 'veículo' in msg_lower,
-            'asking_address': 'endereço' in msg_lower or 'onde mora' in msg_lower,
-            'asking_problem': any(w in msg_lower for w in ['problema', 'aconteceu', 'ocorreu']),
-            'asking_when': 'quando' in msg_lower,
-            'asking_special': any(w in msg_lower for w in ['led', 'xenon', 'sensor', 'câmera']),
-            'asking_city': 'cidade' in msg_lower or 'loja' in msg_lower,
-            'lgpd': 'lgpd' in msg_lower or 'proteção de dados' in msg_lower,
-            'confirming': any(w in msg_lower for w in ['confirma', 'correto', 'isso mesmo']),
-            'closing': any(w in msg_lower for w in ['protocolo', 'validade', 'franquia'])
-        }
+        # IMPORTANTE: Detecta confirmações (ECO) vs perguntas reais
+        is_confirmation = any(w in msg_lower for w in ['confirmando', 'confere', 'correto', 'isso mesmo', 'é isso', 'repito'])
         
-        # Respostas baseadas no contexto
+        # Análise detalhada do que está sendo perguntado
+        is_asking_name = 'nome' in msg_lower and not is_confirmation
+        is_asking_cpf = 'cpf' in msg_lower and not is_confirmation
+        is_asking_phone = ('telefone' in msg_lower or 'contato' in msg_lower) and not is_confirmation
+        is_asking_second = any(w in msg_lower for w in ['segundo', 'outro', 'adicional', 'segunda opção'])
+        is_asking_plate = ('placa' in msg_lower or 'veículo' in msg_lower) and not is_confirmation
+        is_asking_address = ('endereço' in msg_lower or 'onde mora' in msg_lower or 'cep' in msg_lower) and not is_confirmation
+        is_greeting = any(w in msg_lower for w in ['bom dia', 'boa tarde', 'boa noite', 'olá'])
         
-        # Saudação inicial
-        if analysis['greeting'] and not self.state.collected_data['greeting']:
+        # Se é uma saudação inicial
+        if is_greeting and not self.state.collected_data['greeting']:
             self.state.collected_data['greeting'] = True
             return f"Olá! Meu seguro é {self.profile.insurance} e tenho um problema no vidro do meu carro. Preciso resolver isso urgente!"
         
-        # Nome
-        if analysis['asking_name']:
+        # Se está CONFIRMANDO dados (ECO) - NÃO É REPETIÇÃO!
+        if is_confirmation:
+            # Responde positivamente sem reclamar
+            if self.state.patience > 70:
+                return "Sim, está correto."
+            elif self.state.patience > 50:
+                return "Isso mesmo."
+            else:
+                return "Sim, pode prosseguir."
+        
+        # NOME - só reclama se realmente está perguntando de novo
+        if is_asking_name:
             if self.state.collected_data['name']:
                 self.state.repetitions += 1
                 self.state.patience -= 20
-                return f"Já informei meu nome: {self.profile.name}. Vocês não anotam as informações?"
+                return f"Já informei meu nome: {self.profile.name}. Vocês não anotam?"
             else:
                 self.state.collected_data['name'] = True
                 return f"Meu nome é {self.profile.name}."
         
-        # CPF
-        if analysis['asking_cpf']:
+        # CPF - só reclama se realmente está perguntando de novo
+        if is_asking_cpf:
             if self.state.collected_data['cpf']:
-                self.state.repetitions += 1
-                self.state.patience -= 20
-                return f"Já falei o CPF: {self.profile.cpf}. Por favor, prestem atenção!"
+                # Só reclama se não for confirmação
+                if not any(w in msg_lower for w in ['confirmando', str(self.profile.cpf)]):
+                    self.state.repetitions += 1
+                    self.state.patience -= 20
+                    return f"Já informei o CPF: {self.profile.cpf}."
+                else:
+                    return "Sim, está correto."
             else:
                 self.state.collected_data['cpf'] = True
                 return f"Meu CPF é {self.profile.cpf}."
         
-        # Telefones
-        if analysis['asking_phone']:
-            if analysis['asking_second_phone']:
+        # TELEFONES - lógica melhorada
+        if is_asking_phone:
+            if is_asking_second:
                 if self.state.collected_data['phone2']:
                     self.state.patience -= 15
-                    return "Já passei os dois telefones anteriormente!"
+                    return "Já passei o segundo telefone!"
                 else:
                     self.state.collected_data['phone2'] = True
                     return f"O segundo telefone é {self.profile.phone2}."
             else:
+                # Primeira menção a telefone
                 if not self.state.collected_data['phone1']:
                     self.state.collected_data['phone1'] = True
                     return f"Meu telefone é {self.profile.phone1}."
-                elif not self.state.collected_data['phone2']:
-                    self.state.collected_data['phone2'] = True
-                    return f"Tenho também o {self.profile.phone2} como segundo telefone."
-                else:
-                    self.state.patience -= 20
-                    return f"Já informei os dois telefones: {self.profile.phone1} e {self.profile.phone2}!"
+                elif not self.state.collected_data['phone2'] and not any(n in msg_lower for n in [self.profile.phone1[:8], '8888']):
+                    # Se ainda não deu o segundo e não está confirmando o primeiro
+                    return f"Precisa de um segundo número? Tenho também {self.profile.phone2}."
         
-        # Placa
-        if analysis['asking_plate']:
+        # PLACA - só reclama se realmente está perguntando de novo
+        if is_asking_plate:
             if self.state.collected_data['plate']:
-                self.state.repetitions += 1
-                self.state.patience -= 25
-                return f"Já falei isso antes! Placa {self.profile.plate}, é um {self.profile.car}. Estou com pressa, podemos agilizar?"
+                if not any(w in msg_lower for w in ['confirmando', 'abc-1234', 'abc 1234']):
+                    self.state.repetitions += 1
+                    self.state.patience -= 25
+                    return f"Já falei! Placa {self.profile.plate}, é um {self.profile.car}."
+                else:
+                    return "Sim, exatamente."
             else:
                 self.state.collected_data['plate'] = True
                 return f"Placa {self.profile.plate}, é um {self.profile.car}."
         
-        # Endereço
-        if analysis['asking_address']:
+        # ENDEREÇO
+        if is_asking_address:
             if self.state.collected_data['address']:
                 self.state.patience -= 20
-                return "Já informei meu endereço completo anteriormente."
+                return "Já passei meu endereço completo."
             else:
                 self.state.collected_data['address'] = True
                 return f"Meu endereço é {self.profile.address}."
         
         # LGPD
-        if analysis['lgpd']:
+        if 'lgpd' in msg_lower or 'proteção de dados' in msg_lower or 'lei geral' in msg_lower:
             self.state.collected_data['lgpd'] = True
             return "Sim, autorizo o compartilhamento dos dados para o atendimento."
         
-        # Problema
-        if analysis['asking_problem']:
+        # PROBLEMA/DANO
+        if any(w in msg_lower for w in ['problema', 'aconteceu', 'ocorreu', 'o que houve']):
             if not self.state.collected_data['problem']:
                 self.state.collected_data['problem'] = True
                 return f"Tenho uma {self.profile.problem}. Aconteceu {self.profile.problem_date} na estrada."
             else:
-                return "Como já disse, é uma trinca no para-brisa de 15cm."
+                return f"Como já disse, é uma trinca de 15cm no para-brisa."
         
-        # Quando aconteceu
-        if analysis['asking_when']:
-            return f"Aconteceu {self.profile.problem_date} quando estava dirigindo na estrada."
+        # QUANDO
+        if 'quando' in msg_lower and 'aconteceu' in msg_lower:
+            return f"Foi {self.profile.problem_date}, estava dirigindo na estrada."
         
-        # LED/Xenon
-        if analysis['asking_special']:
+        # LED/XENON/SENSOR - resposta específica
+        if any(w in msg_lower for w in ['led', 'xenon', 'sensor', 'câmera', 'chuva']):
             self.state.collected_data['damage_details'] = True
-            return "Não, o veículo não tem LED, Xenon ou sensor no vidro."
+            return "Não, o veículo não tem LED, Xenon ou sensor de chuva no vidro."
         
-        # Cidade/Loja
-        if analysis['asking_city']:
-            self.state.collected_data['city'] = True
-            return "Prefiro fazer em São Paulo, na loja mais próxima da Vila Olímpia."
-        
-        # Confirmações
-        if analysis['confirming']:
-            if self.state.patience > 50:
-                return "Sim, está correto."
+        # CIDADE/LOJA
+        if any(w in msg_lower for w in ['cidade', 'loja', 'unidade', 'onde prefere', 'localização para']):
+            if not self.state.collected_data['city']:
+                self.state.collected_data['city'] = True
+                return "Prefiro fazer em São Paulo, na loja mais próxima da Vila Olímpia."
             else:
-                return "Isso mesmo, podemos prosseguir?"
+                return "Como disse, Vila Olímpia em São Paulo."
         
-        # Encerramento
-        if analysis['closing']:
+        # PROTOCOLO/ENCERRAMENTO
+        if any(w in msg_lower for w in ['protocolo', 'validade', 'franquia', 'documento', 'prazo']):
             self.state.collected_data['closing'] = True
-            return "Ok, anotei as informações. Preciso levar algum documento?"
+            return "Ok, anotei tudo. Preciso levar algum documento específico?"
         
-        # Pesquisa
-        if 'pesquisa' in msg_lower:
+        # PESQUISA DE SATISFAÇÃO
+        if 'pesquisa' in msg_lower or 'satisfação' in msg_lower or 'avaliação' in msg_lower:
             return "Sim, responderei a pesquisa de satisfação."
         
-        # Agradecimento
-        if any(w in msg_lower for w in ['obrigado', 'agradeço', 'tenha um']):
+        # AGRADECIMENTO
+        if any(w in msg_lower for w in ['obrigado', 'obrigada', 'agradeço', 'tenha um']):
             return "Obrigado pelo atendimento!"
         
-        # Resposta padrão baseada no estado emocional
+        # DÚVIDAS
+        if 'dúvida' in msg_lower or 'alguma pergunta' in msg_lower:
+            return "Não, está tudo claro. Obrigado!"
+        
+        # Resposta padrão contextual
         if self.state.patience < 30:
-            return "Estou com pressa, podemos agilizar?"
-        elif self.state.repetitions > 2:
-            return "Olha, vocês precisam prestar mais atenção. Já repeti várias informações."
+            return "Estou com pressa, podemos agilizar o atendimento?"
         else:
-            return "Certo, qual a próxima informação que precisa?"
+            return "Certo, pode prosseguir."
 
 # ==================== INTERFACE PRINCIPAL ====================
 def init_session_state():
@@ -674,15 +805,18 @@ def main_interface():
                         # Avalia a mensagem
                         st.session_state.evaluator.evaluate_message(user_input)
                         
-                        # Verifica repetições
+                        # Verifica se é confirmação (ECO) ou repetição real
+                        is_confirmation = any(w in user_input.lower() for w in ['confirmando', 'confere', 'correto', 'isso mesmo', 'é isso', 'repito'])
+                        
+                        # Salva estado anterior de repetições
                         old_repetitions = st.session_state.customer.state.repetitions
                         
                         # Gera resposta do cliente
                         customer_response = st.session_state.customer.generate_response(user_input)
                         st.session_state.messages.append(("cliente", customer_response))
                         
-                        # Penaliza se houve repetição
-                        if st.session_state.customer.state.repetitions > old_repetitions:
+                        # Só penaliza se houve repetição REAL (não confirmação ECO)
+                        if st.session_state.customer.state.repetitions > old_repetitions and not is_confirmation:
                             st.session_state.evaluator.penalize_repetition()
                         
                         st.rerun()
@@ -701,7 +835,7 @@ def main_interface():
             st.markdown('</div>', unsafe_allow_html=True)
         
         with col_right:
-            # Métricas em tempo real
+# Métricas em tempo real
             st.markdown("### 📊 Métricas")
             
             total, max_score = st.session_state.evaluator.get_total_score()
@@ -872,27 +1006,28 @@ def results_screen():
             st.info("Função de histórico em desenvolvimento")
     
     with col3:
-        if st.button("📥 Exportar Relatório", use_container_width=True):
-            # Gera JSON do relatório
-            report_data = {
-                "usuario": st.session_state.username,
-                "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "pontuacao_total": total,
-                "pontuacao_maxima": 81,
-                "percentual": percentage,
-                "aprovado": percentage >= 80,
-                "duracao_segundos": int(time.time() - st.session_state.start_time) if st.session_state.start_time else 0,
-                "detalhamento": report,
-                "satisfacao_cliente": patience,
-                "repeticoes": repetitions
-            }
-            
-            st.download_button(
-                label="💾 Baixar JSON",
-                data=json.dumps(report_data, indent=2, ensure_ascii=False),
-                file_name=f"relatorio_voice_coach_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
-            )
+        # Preparar dados para download
+        import json
+        report_data = {
+            "usuario": st.session_state.username,
+            "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "pontuacao_total": total,
+            "pontuacao_maxima": 81,
+            "percentual": percentage,
+            "aprovado": percentage >= 80,
+            "duracao_segundos": int(time.time() - st.session_state.start_time) if st.session_state.start_time else 0,
+            "detalhamento": report,
+            "satisfacao_cliente": patience,
+            "repeticoes": repetitions
+        }
+        
+        st.download_button(
+            label="📥 Exportar Relatório",
+            data=json.dumps(report_data, indent=2, ensure_ascii=False),
+            file_name=f"relatorio_voice_coach_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
 
 # ==================== FUNÇÃO PRINCIPAL ====================
 def main():
